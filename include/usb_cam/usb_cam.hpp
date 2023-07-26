@@ -85,17 +85,17 @@ typedef struct
   int image_width;
   int image_height;
   int framerate;
+  // get full ist of supported parameters by calling 'v4l2-ctl --device=<device> -L'
   int brightness;
   int contrast;
   int saturation;
   int sharpness;
   int gain;
-  int white_balance;
-  int exposure;
-  int focus;
-  bool auto_white_balance;
-  bool autoexposure;
-  bool autofocus;
+  int white_balance_temperature;
+  int exposure_time_absolute;
+  bool white_balance_automatic;
+  bool auto_exposure;
+  bool backlight_compensation;
 } parameters_t;
 
 typedef struct

@@ -1,0 +1,24 @@
+/**:
+    ros__parameters:
+      video_device: "/dev/video6"
+      framerate: 30.0
+      io_method: "mmap" # mmap | userptr
+      frame_id: "camera"
+      # pixel_format: "uyvy"
+      pixel_format: "mjpeg"
+      # pixel_format: "mjpeg2rgb"
+      av_device_format: "YUV420P"
+      image_width: 640 
+      image_height: 480
+      camera_name: "See3CAM"
+      camera_info_url: "package://usb_cam/config/camera_info.yaml"
+      brightness: -1
+      contrast: -1
+      saturation: -1
+      sharpness: -1
+      gain: -1
+      white_balance_automatic: true
+      white_balance_temperature: 4000
+      auto_exposure: true
+      exposure_time_absolute: 100
+      backlight_compensation: true
