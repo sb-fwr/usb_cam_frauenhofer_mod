@@ -52,6 +52,7 @@ extern "C" {
 #include "usb_cam/usb_cam.hpp"
 #include "usb_cam/formats/pixel_format_base.hpp"
 #include "usb_cam/formats/utils.hpp"
+#include "usb_cam/formats/av_pixel_format_helper.hpp"
 
 
 namespace usb_cam
@@ -62,86 +63,15 @@ namespace formats
 class RAW_MJPEG : public pixel_format_base
 {
 public:
-  RAW_MJPEG(const AVPixelFormat & avDeviceFormat)
+  explicit RAW_MJPEG(const AVPixelFormat & avDeviceFormat)
   : pixel_format_base(
       "raw_mjpeg",
       V4L2_PIX_FMT_MJPEG,
-      usb_cam::constants::YUV422,
-      2,
-      8,
+      get_ros_pixel_format_from_av_format(avDeviceFormat),
+      get_channels_from_av_format(avDeviceFormat),
+      get_bit_depth_from_av_format(avDeviceFormat),
       false)
   {
-    switch(avDeviceFormat)
-    {      
-      default:
-      {
-        m_ros = usb_cam::constants::UNKNOWN;
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_RGB24:
-      {
-        m_ros = usb_cam::constants::RGB8;
-        m_channels = 3;
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_RGBA:
-      {
-        m_ros = usb_cam::constants::RGBA8;
-        m_channels = 4;
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_BGR24:
-      {
-        m_ros = usb_cam::constants::BGR8;
-        m_channels = 3;
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_BGRA:
-      {
-        m_ros = usb_cam::constants::BGRA8;
-        m_channels = 4;
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_GRAY8:
-      {
-        m_ros = usb_cam::constants::MONO8;
-        m_channels = 1;
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_GRAY16BE:
-      {
-        m_ros = usb_cam::constants::MONO16;
-        m_channels = 1;
-        m_bit_depth = 16;
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_YUV422P:
-      {
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_YUV420P:
-      {
-        m_ros = usb_cam::constants::NV21;
-        m_channels = 2;
-      }
-      break;
-
-      case AVPixelFormat::AV_PIX_FMT_YUV444P:
-      {
-        m_ros = usb_cam::constants::NV24;
-        m_channels = 2;
-      }
-      break;
-    }
-
   }
 };
 
@@ -161,7 +91,6 @@ public:
     m_avframe_device(av_frame_alloc()),
     m_avframe_rgb(av_frame_alloc()),
     m_avoptions(NULL),
-    m_avpacket(av_packet_alloc()),
     m_averror_str(reinterpret_cast<char *>(malloc(AV_ERROR_MAX_STRING_SIZE)))
   {
     if (!m_avcodec) {
@@ -170,9 +99,6 @@ public:
 
     if (!m_avparser) {
       throw std::runtime_error("Could not find MJPEG parser");
-    }
-    if (!m_avpacket) {
-      throw std::runtime_error("Could not allocate AVPacket");
     }
 
     m_avcodec_context = avcodec_alloc_context3(m_avcodec);
@@ -232,6 +158,12 @@ public:
 
   ~MJPEG2RGB()
   {
+    if (m_averror_str) {
+      free(m_averror_str);
+    }
+    if (m_avoptions) {
+      free(m_avoptions);
+    }
     if (m_avcodec_context) {
       avcodec_close(m_avcodec_context);
       avcodec_free_context(&m_avcodec_context);
@@ -241,10 +173,6 @@ public:
     }
     if (m_avframe_rgb) {
       av_frame_free(&m_avframe_rgb);
-    }
-    if (m_avpacket) {
-      av_packet_unref(m_avpacket);
-      av_packet_free(&m_avpacket);
     }
     if (m_avparser) {
       av_parser_close(m_avparser);
@@ -261,26 +189,20 @@ public:
     // clear the picture
     memset(dest, 0, m_avframe_device_size);
 
-    #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 133, 100)
-    // deprecated: https://github.com/FFmpeg/FFmpeg/commit/f7db77bd8785d1715d3e7ed7e69bd1cc991f2d07
-    av_init_packet(m_avpacket);
-    #endif
-
-    av_packet_from_data(
-      m_avpacket,
-      const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(src)),
-      bytes_used);
+    auto avpacket = av_packet_alloc();
+    av_new_packet(avpacket, bytes_used);
+    memcpy(avpacket->data, src, bytes_used);
 
     // Pass src MJPEG image to decoder
-    m_result = avcodec_send_packet(m_avcodec_context, m_avpacket);
+    m_result = avcodec_send_packet(m_avcodec_context, avpacket);
 
-    #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(58, 133, 100)
-    av_packet_unref(m_avpacket);
-    #endif
+    av_packet_free(&avpacket);
+
     // If result is not 0, report what went wrong
     if (m_result != 0) {
       std::cerr << "Failed to send AVPacket to decode: ";
       print_av_error_string(m_result);
+      return;
     }
 
     m_result = avcodec_receive_frame(m_avcodec_context, m_avframe_device);
@@ -290,6 +212,7 @@ public:
     } else if (m_result < 0) {
       std::cerr << "Failed to recieve decoded frame from codec: ";
       print_av_error_string(m_result);
+      return;
     }
 
     sws_scale(
@@ -317,7 +240,6 @@ private:
   AVFrame * m_avframe_device;
   AVFrame * m_avframe_rgb;
   AVDictionary * m_avoptions;
-  AVPacket * m_avpacket;
   SwsContext * m_sws_context;
   size_t m_avframe_device_size;
   size_t m_avframe_rgb_size;
