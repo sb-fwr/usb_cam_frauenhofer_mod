@@ -337,7 +337,7 @@ void UsbCamNode::set_v4l2_params()
     RCLCPP_INFO(this->get_logger(), "Setting 'exposure_time_absolute' to %d", m_parameters.exposure_time_absolute);
     m_camera->set_v4l_parameter("exposure_time_absolute", m_parameters.exposure_time_absolute);
   } else {
-    RCLCPP_INFO(this->get_logger(), "Setting 'exposure' to 'AUTO'", 0);
+    RCLCPP_INFO(this->get_logger(), "Setting 'exposure' to 'AUTO'");
     m_camera->set_v4l_parameter("auto_exposure", 0);
   }
 

@@ -744,7 +744,10 @@ const std::unordered_map<std::string, AVPixelFormat> STR_2_AVPIXFMT = {
                                                                       ///< big-endian
 
 
-  {stringify(AV_PIX_FMT_XVMC), AV_PIX_FMT_XVMC},                      ///< XVideo Motion
+#ifdef AV_PIX_FMT_XVMC
+{stringify(AV_PIX_FMT_XVMC), AV_PIX_FMT_XVMC},  ///< XVideo Motion
+#endif
+  // {stringify(AV_PIX_FMT_XVMC), AV_PIX_FMT_XVMC},                      ///< XVideo Motion
                                                                       ///< Acceleration via common
                                                                       ///< packet passing
 

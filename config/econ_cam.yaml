@@ -1,6 +1,6 @@
 /**:
     ros__parameters:
-      video_device: "/dev/video0"
+      video_device: "/dev/video4"
       framerate: 30.0
       io_method: "mmap" # mmap | userptr
       frame_id: "camera"
@@ -8,8 +8,8 @@
       pixel_format: "mjpeg"
       # pixel_format: "mjpeg2rgb"
       av_device_format: "YUV420P"
-      image_width: 640 
-      image_height: 480
+      image_width: 1920 
+      image_height: 1080
       camera_name: "See3CAM"
       camera_info_url: "package://usb_cam/config/camera_info.yaml"
       brightness: -1
