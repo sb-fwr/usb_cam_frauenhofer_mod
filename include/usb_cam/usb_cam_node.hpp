@@ -27,7 +27,6 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-
 #ifndef USB_CAM__USB_CAM_NODE_HPP_
 #define USB_CAM__USB_CAM_NODE_HPP_
 
@@ -44,56 +43,54 @@
 
 #include "usb_cam/usb_cam.hpp"
 
-
-std::ostream & operator<<(std::ostream & ostr, const rclcpp::Time & tm)
+std::ostream &operator<<(std::ostream &ostr, const rclcpp::Time &tm)
 {
   ostr << tm.nanoseconds();
   return ostr;
 }
 
-
 namespace usb_cam
 {
 
-class UsbCamNode : public rclcpp::Node
-{
-public:
-  explicit UsbCamNode(const rclcpp::NodeOptions & node_options);
-  ~UsbCamNode();
+  class UsbCamNode : public rclcpp::Node
+  {
+  public:
+    explicit UsbCamNode(const rclcpp::NodeOptions &node_options);
+    ~UsbCamNode();
 
-  void init();
-  void get_params();
-  void assign_params(const std::vector<rclcpp::Parameter> & parameters);
-  void set_v4l2_params();
-  void update();
-  bool take_and_send_image();
-  bool take_and_send_image_mjpeg();
+    void init();
+    void get_params();
+    void assign_params(const std::vector<rclcpp::Parameter> &parameters);
+    void set_v4l2_params();
+    void update();
+    bool take_and_send_image();
+    bool take_and_send_image_mjpeg();
+    void resize_if_nessesary(size_t size);
+    rcl_interfaces::msg::SetParametersResult parameters_callback(
+        const std::vector<rclcpp::Parameter> &parameters);
 
-  rcl_interfaces::msg::SetParametersResult parameters_callback(
-    const std::vector<rclcpp::Parameter> & parameters);
+    void service_capture(
+        const std::shared_ptr<rmw_request_id_t> request_header,
+        const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+        std::shared_ptr<std_srvs::srv::SetBool::Response> response);
 
-  void service_capture(
-    const std::shared_ptr<rmw_request_id_t> request_header,
-    const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-    std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+    UsbCam *m_camera;
 
-  UsbCam * m_camera;
+    sensor_msgs::msg::Image::UniquePtr m_image_msg;
+    sensor_msgs::msg::CompressedImage::UniquePtr m_compressed_img_msg;
+    std::shared_ptr<image_transport::CameraPublisher> m_image_publisher;
+    rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr m_compressed_image_publisher;
+    rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr m_compressed_cam_info_publisher;
 
-  sensor_msgs::msg::Image::UniquePtr m_image_msg;
-  sensor_msgs::msg::CompressedImage::UniquePtr m_compressed_img_msg;
-  std::shared_ptr<image_transport::CameraPublisher> m_image_publisher;
-  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr m_compressed_image_publisher;
-  rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr m_compressed_cam_info_publisher;
+    parameters_t m_parameters;
 
-  parameters_t m_parameters;
+    sensor_msgs::msg::CameraInfo::SharedPtr m_camera_info_msg;
+    std::shared_ptr<camera_info_manager::CameraInfoManager> m_camera_info;
 
-  sensor_msgs::msg::CameraInfo::SharedPtr m_camera_info_msg;
-  std::shared_ptr<camera_info_manager::CameraInfoManager> m_camera_info;
+    rclcpp::TimerBase::SharedPtr m_timer;
 
-  rclcpp::TimerBase::SharedPtr m_timer;
-
-  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr m_service_capture;
-  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr m_parameters_callback_handle;
-};
-}  // namespace usb_cam
-#endif  // USB_CAM__USB_CAM_NODE_HPP_
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr m_service_capture;
+    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr m_parameters_callback_handle;
+  };
+} // namespace usb_cam
+#endif // USB_CAM__USB_CAM_NODE_HPP_

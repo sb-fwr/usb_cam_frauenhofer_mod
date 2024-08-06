@@ -26,6 +26,8 @@ As of today this package should be available for binary installation on all acti
 
 If for some reason you cannot install the binaries, follow the directions below to compile from source.
 
+## Displaying images
+ros2 run image_view image_view --ros-args --remap image/compressed:=/image_raw/compressed -p image_transport:=compressed
 ## Building from Source
 
 Clone/Download the source code into your workspace:

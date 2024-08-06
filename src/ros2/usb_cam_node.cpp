@@ -41,7 +41,9 @@ namespace usb_cam
 
 UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
 : Node("usb_cam", node_options),
-  m_camera(new usb_cam::UsbCam()),
+  // m_camera(new usb_cam::UsbCam()),
+   m_camera(new usb_cam::UsbCam([this](size_t size) -> void
+                                     { return this->resize_if_nessesary(size); })),
   m_image_msg(new sensor_msgs::msg::Image()),
   m_compressed_img_msg(nullptr),
   m_image_publisher(std::make_shared<image_transport::CameraPublisher>(
@@ -91,6 +93,14 @@ UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
       &UsbCamNode::parameters_callback, this,
       std::placeholders::_1));
 }
+  void UsbCamNode::resize_if_nessesary(size_t size)
+  {
+    // Only resize if required
+    if (sizeof(m_compressed_img_msg->data) != size)
+    {
+      m_compressed_img_msg->data.resize(size);
+    }
+  }
 
 UsbCamNode::~UsbCamNode()
 {
