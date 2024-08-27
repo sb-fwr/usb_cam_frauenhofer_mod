@@ -98,7 +98,6 @@ namespace usb_cam
     {
       resize_ros_image_buffer_if_nessesary(size);
     }
-    // TODO(flynneva): could we skip the copy here somehow?
     // If no conversion required, just copy the image from V4L2 buffer
     if (m_image.pixel_format->requires_conversion() == false)
     {
@@ -841,7 +840,7 @@ namespace usb_cam
       std::cerr << "usb_cam_node could not run '" << cmd.c_str() << "'" << std::endl;
       retcode = 1;
     }
-    return retcode;
+    return !retcode;
   }
 
 } // namespace usb_cam

@@ -78,8 +78,8 @@ namespace usb_cam
     this->declare_parameter("camera_info_url", "");
     this->declare_parameter("framerate", 30.0);
     this->declare_parameter("frame_id", "default_cam");
-    this->declare_parameter("image_height", 480);
-    this->declare_parameter("image_width", 640);
+    this->declare_parameter("image_height", 720);
+    this->declare_parameter("image_width", 1280);
     this->declare_parameter("io_method", "mmap");
     this->declare_parameter("pixel_format", "yuyv");
     this->declare_parameter("av_device_format", "YUV422P");
@@ -115,32 +115,32 @@ namespace usb_cam
     delete (m_camera);
   }
 
-std::string UsbCamNode::control_type_to_string(__u32 type)
-{
-  switch (type)
+  std::string UsbCamNode::control_type_to_string(__u32 type)
   {
-  case V4L2_CTRL_TYPE_INTEGER:
-    return "int";
-  case V4L2_CTRL_TYPE_BOOLEAN:
-    return "bool";
-  case V4L2_CTRL_TYPE_MENU:
-    return "int";
-  case V4L2_CTRL_TYPE_BUTTON:
-    return "button";
-  case V4L2_CTRL_TYPE_INTEGER64:
-    return "int64_t";
-  case V4L2_CTRL_TYPE_CTRL_CLASS:
-    return "class";
-  case V4L2_CTRL_TYPE_STRING:
-    return "string";
-  case V4L2_CTRL_TYPE_BITMASK:
-    return "bitmask";
-  case V4L2_CTRL_TYPE_INTEGER_MENU:
-    return "int_menu";
-  default:
-    return "unknown";
+    switch (type)
+    {
+    case V4L2_CTRL_TYPE_INTEGER:
+      return "int";
+    case V4L2_CTRL_TYPE_BOOLEAN:
+      return "bool";
+    case V4L2_CTRL_TYPE_MENU:
+      return "int";
+    case V4L2_CTRL_TYPE_BUTTON:
+      return "button";
+    case V4L2_CTRL_TYPE_INTEGER64:
+      return "int64_t";
+    case V4L2_CTRL_TYPE_CTRL_CLASS:
+      return "class";
+    case V4L2_CTRL_TYPE_STRING:
+      return "string";
+    case V4L2_CTRL_TYPE_BITMASK:
+      return "bitmask";
+    case V4L2_CTRL_TYPE_INTEGER_MENU:
+      return "int_menu";
+    default:
+      return "unknown";
+    }
   }
-}
 
   void UsbCamNode::declare_camera_parameters(rclcpp::Node *node, std::vector<ControlInfo> cam_params)
   {
@@ -183,7 +183,6 @@ std::string UsbCamNode::control_type_to_string(__u32 type)
       RCLCPP_INFO_STREAM(node->get_logger(), "Declared parameter: " << param.name << "; control_type:" << control_type);
     }
   }
-
 
   std::vector<ControlInfo> UsbCamNode::get_control_data(const std::string &device)
   {
@@ -513,19 +512,64 @@ std::string UsbCamNode::control_type_to_string(__u32 type)
     m_compressed_cam_info_publisher->publish(*m_camera_info_msg);
     return true;
   }
+  // Function to find a ControlInfo by name
+  std::optional<ControlInfo> UsbCamNode::findControlInfoByName(const std::string &name)
+  {
+    auto it = std::find_if(cam_params.begin(), cam_params.end(), [&name](const ControlInfo &ci)
+                           { return ci.name == name; });
+
+    if (it != cam_params.end())
+    {
+      return *it; // Found the ControlInfo
+    }
+    else
+    {
+      return std::nullopt; // Not found, return an empty optional
+    }
+  }
 
   rcl_interfaces::msg::SetParametersResult UsbCamNode::parameters_callback(
       const std::vector<rclcpp::Parameter> &parameters)
   {
-    RCLCPP_DEBUG(this->get_logger(), "Setting parameters for %s", m_parameters.camera_name.c_str());
-    m_timer->reset();
-    assign_params();
-    RCLCPP_DEBUG(this->get_logger(), " %ld", parameters.size());
 
-    set_v4l2_params();
+    std::cout << parameters.size() << std::endl;
     rcl_interfaces::msg::SetParametersResult result;
-    result.successful = true;
-    result.reason = "success";
+    uint nr_failures = 0;
+    for (rclcpp::Parameter parameter : parameters)
+    {
+      std::cout << parameter.get_name() << std::endl;
+      auto cf = findControlInfoByName(parameter.get_name());
+      if (cf)
+      {
+        cf->set_value = parameter.as_int();
+        std::cout << cf->set_value << std::endl;
+
+        result.successful = m_camera->set_v4l_parameter(cf->name, cf->set_value);
+        result.reason += "m_camera->set_v4l_parameter(" + cf->name + ", " + std::to_string(cf->set_value) + ")";
+
+        if (!result.successful)
+        {
+          result.reason += " failed";
+          nr_failures++;
+        }
+        RCLCPP_INFO(this->get_logger(), " %s", result.reason.c_str());
+      }
+      else
+      {
+        result.reason += "findControlInfoByName(" + parameter.get_name() + ") failed";
+        nr_failures++;
+      }
+    }
+    // m_timer->reset();
+    // assign_params();
+    // RCLCPP_DEBUG(this->get_logger(), " %ld", parameters.size());
+
+    // set_v4l2_params();
+    if (!nr_failures)
+    {
+      result.reason = " success";
+    }
+
     return result;
   }
 

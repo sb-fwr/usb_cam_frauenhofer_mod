@@ -54,6 +54,7 @@ struct ControlInfo
   int set_value;
   std::vector<std::string> menu_items;
 };
+std::vector<ControlInfo> cam_params;
 
 std::ostream &operator<<(std::ostream &ostr, const rclcpp::Time &tm)
 {
@@ -82,6 +83,7 @@ namespace usb_cam
     std::string control_type_to_string(__u32 type);
     std::vector<ControlInfo> get_control_data(const std::string &device);
     void declare_camera_parameters(rclcpp::Node *node, std::vector<ControlInfo> cam_params);
+    std::optional<ControlInfo> findControlInfoByName(const std::string &name);
 
     rcl_interfaces::msg::SetParametersResult parameters_callback(
         const std::vector<rclcpp::Parameter> &parameters);
