@@ -43,6 +43,18 @@
 
 #include "usb_cam/usb_cam.hpp"
 
+struct ControlInfo
+{
+  std::string name;
+  __u32 type;
+  int minimum;
+  int maximum;
+  int step;
+  int default_value;
+  int set_value;
+  std::vector<std::string> menu_items;
+};
+
 std::ostream &operator<<(std::ostream &ostr, const rclcpp::Time &tm)
 {
   ostr << tm.nanoseconds();
@@ -60,12 +72,17 @@ namespace usb_cam
 
     void init();
     void get_params();
-    void assign_params(const std::vector<rclcpp::Parameter> &parameters);
+    void assign_params();
     void set_v4l2_params();
     void update();
     bool take_and_send_image();
     bool take_and_send_image_mjpeg();
-    void resize_if_nessesary(size_t size);
+    void resize_ros_image_buffer_if_nessesary(size_t size);
+
+    std::string control_type_to_string(__u32 type);
+    std::vector<ControlInfo> get_control_data(const std::string &device);
+    void declare_camera_parameters(rclcpp::Node *node, std::vector<ControlInfo> cam_params);
+
     rcl_interfaces::msg::SetParametersResult parameters_callback(
         const std::vector<rclcpp::Parameter> &parameters);
 
@@ -91,6 +108,9 @@ namespace usb_cam
 
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr m_service_capture;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr m_parameters_callback_handle;
+
+  private:
+    std::vector<ControlInfo> cam_params;
   };
 } // namespace usb_cam
 #endif // USB_CAM__USB_CAM_NODE_HPP_

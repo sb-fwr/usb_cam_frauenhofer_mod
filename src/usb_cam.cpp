@@ -69,8 +69,8 @@ namespace usb_cam
 
   using utils::io_method_t;
 
-  UsbCam::UsbCam(std::function<void(size_t)> resize_if_nessesary)
-      : resize_if_nessesary(resize_if_nessesary),
+  UsbCam::UsbCam(std::function<void(size_t)> resize_ros_image_buffer_if_nessesary)
+      : resize_ros_image_buffer_if_nessesary(resize_ros_image_buffer_if_nessesary),
         m_device_name(), m_io(io_method_t::IO_METHOD_MMAP), m_fd(-1),
         m_number_of_buffers(4), m_buffers(new usb_cam::utils::buffer[m_number_of_buffers]), m_image(),
         m_avframe(NULL), m_avcodec(NULL), m_avoptions(NULL),
@@ -93,10 +93,10 @@ namespace usb_cam
   void UsbCam::process_image(const char *src, char *&dest, const int &bytes_used)
   {
     size_t size = findJPEGSize(src, bytes_used);
-    std::cerr << "size" << size << std::endl;
+    // std::cerr << "size" << size << std::endl;
     if (size < 1241330)
     {
-      resize_if_nessesary(size);
+      resize_ros_image_buffer_if_nessesary(size);
     }
     // TODO(flynneva): could we skip the copy here somehow?
     // If no conversion required, just copy the image from V4L2 buffer

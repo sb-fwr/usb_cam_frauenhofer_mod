@@ -1,6 +1,6 @@
 /**:
     ros__parameters:
-      video_device: "/dev/video4"
+      video_device: "/dev/video0"
       framerate: 30.0
       io_method: "mmap" # mmap | userptr
       frame_id: "camera"
@@ -19,6 +19,6 @@
       gain: -1
       white_balance_automatic: true
       white_balance_temperature: 4000
-      auto_exposure: true
+      auto_exposure: 0
       exposure_time_absolute: 100
-      backlight_compensation: true
+      backlight_compensation: 0

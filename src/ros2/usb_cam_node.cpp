@@ -39,61 +39,60 @@ const char BASE_TOPIC_NAME[] = "image_raw";
 namespace usb_cam
 {
 
-UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
-: Node("usb_cam", node_options),
-  // m_camera(new usb_cam::UsbCam()),
-   m_camera(new usb_cam::UsbCam([this](size_t size) -> void
-                                     { return this->resize_if_nessesary(size); })),
-  m_image_msg(new sensor_msgs::msg::Image()),
-  m_compressed_img_msg(nullptr),
-  m_image_publisher(std::make_shared<image_transport::CameraPublisher>(
-      image_transport::create_camera_publisher(this, BASE_TOPIC_NAME,
-      rclcpp::QoS {100}.get_rmw_qos_profile()))),
-  m_compressed_image_publisher(nullptr),
-  m_compressed_cam_info_publisher(nullptr),
-  m_parameters(),
-  m_camera_info_msg(new sensor_msgs::msg::CameraInfo()),
-  m_service_capture(
-    this->create_service<std_srvs::srv::SetBool>(
-      "set_capture",
-      std::bind(
-        &UsbCamNode::service_capture,
-        this,
-        std::placeholders::_1,
-        std::placeholders::_2,
-        std::placeholders::_3)))
-{
-  // declare params
-  // get full ist of supported parameters by calling 'v4l2-ctl --device=<device> -L'
-  this->declare_parameter("camera_name", "default_cam");
-  this->declare_parameter("camera_info_url", "");
-  this->declare_parameter("framerate", 30.0);
-  this->declare_parameter("frame_id", "default_cam");
-  this->declare_parameter("image_height", 480);
-  this->declare_parameter("image_width", 640);
-  this->declare_parameter("io_method", "mmap");
-  this->declare_parameter("pixel_format", "yuyv");
-  this->declare_parameter("av_device_format", "YUV422P");
-  this->declare_parameter("video_device", "/dev/video0");
-  this->declare_parameter("brightness", 50);  // 0-255, -1 "leave alone"
-  this->declare_parameter("contrast", -1);    // 0-255, -1 "leave alone"
-  this->declare_parameter("saturation", -1);  // 0-255, -1 "leave alone"
-  this->declare_parameter("sharpness", -1);   // 0-255, -1 "leave alone"
-  this->declare_parameter("gain", -1);        // 0-100?, -1 "leave alone"
-  this->declare_parameter("white_balance_automatic", true);
-  this->declare_parameter("white_balance_temperature", 4000);
-  this->declare_parameter("auto_exposure", true);
-  this->declare_parameter("exposure_time_absolute", 100);
-  this->declare_parameter("backlight_compensation", false);
+  UsbCamNode::UsbCamNode(const rclcpp::NodeOptions &node_options)
+      : Node("usb_cam", node_options),
+        // m_camera(new usb_cam::UsbCam()),
+        m_camera(new usb_cam::UsbCam([this](size_t size) -> void
+                                     { return this->resize_ros_image_buffer_if_nessesary(size); })),
+        m_image_msg(new sensor_msgs::msg::Image()),
+        m_compressed_img_msg(nullptr),
+        m_image_publisher(std::make_shared<image_transport::CameraPublisher>(
+            image_transport::create_camera_publisher(this, BASE_TOPIC_NAME,
+                                                     rclcpp::QoS{100}.get_rmw_qos_profile()))),
+        m_compressed_image_publisher(nullptr),
+        m_compressed_cam_info_publisher(nullptr),
+        m_parameters(),
+        m_camera_info_msg(new sensor_msgs::msg::CameraInfo()),
+        m_service_capture(
+            this->create_service<std_srvs::srv::SetBool>(
+                "set_capture",
+                std::bind(
+                    &UsbCamNode::service_capture,
+                    this,
+                    std::placeholders::_1,
+                    std::placeholders::_2,
+                    std::placeholders::_3)))
+  {
+    this->declare_parameter("video_device", "/dev/video0");
+    auto parameters_client = std::make_shared<rclcpp::SyncParametersClient>(this);
 
-  get_params();
-  init();
-  m_parameters_callback_handle = add_on_set_parameters_callback(
-    std::bind(
-      &UsbCamNode::parameters_callback, this,
-      std::placeholders::_1));
-}
-  void UsbCamNode::resize_if_nessesary(size_t size)
+    std::string device_path = this->get_parameter("video_device").as_string();
+    RCLCPP_INFO(this->get_logger(), "device_path value: %s", device_path.c_str());
+    m_parameters.device_name = device_path;
+    cam_params = get_control_data(device_path);
+    // Get camera parameters using V4L2
+
+    // declare params
+    // get full ist of supported parameters by calling 'v4l2-ctl --device=<device> -L'
+    this->declare_parameter("camera_name", "default_cam");
+    this->declare_parameter("camera_info_url", "");
+    this->declare_parameter("framerate", 30.0);
+    this->declare_parameter("frame_id", "default_cam");
+    this->declare_parameter("image_height", 480);
+    this->declare_parameter("image_width", 640);
+    this->declare_parameter("io_method", "mmap");
+    this->declare_parameter("pixel_format", "yuyv");
+    this->declare_parameter("av_device_format", "YUV422P");
+    declare_camera_parameters(this, cam_params);
+
+    assign_params();
+    init();
+    m_parameters_callback_handle = add_on_set_parameters_callback(
+        std::bind(
+            &UsbCamNode::parameters_callback, this,
+            std::placeholders::_1));
+  }
+  void UsbCamNode::resize_ros_image_buffer_if_nessesary(size_t size)
   {
     // Only resize if required
     if (sizeof(m_compressed_img_msg->data) != size)
@@ -102,345 +101,449 @@ UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
     }
   }
 
-UsbCamNode::~UsbCamNode()
-{
-  RCLCPP_WARN(this->get_logger(), "Shutting down");
-  m_image_msg.reset();
-  m_compressed_img_msg.reset();
-  m_camera_info_msg.reset();
-  m_camera_info.reset();
-  m_timer.reset();
-  m_service_capture.reset();
-  m_parameters_callback_handle.reset();
+  UsbCamNode::~UsbCamNode()
+  {
+    RCLCPP_WARN(this->get_logger(), "Shutting down");
+    m_image_msg.reset();
+    m_compressed_img_msg.reset();
+    m_camera_info_msg.reset();
+    m_camera_info.reset();
+    m_timer.reset();
+    m_service_capture.reset();
+    m_parameters_callback_handle.reset();
 
-  delete (m_camera);
+    delete (m_camera);
+  }
+
+std::string UsbCamNode::control_type_to_string(__u32 type)
+{
+  switch (type)
+  {
+  case V4L2_CTRL_TYPE_INTEGER:
+    return "int";
+  case V4L2_CTRL_TYPE_BOOLEAN:
+    return "bool";
+  case V4L2_CTRL_TYPE_MENU:
+    return "int";
+  case V4L2_CTRL_TYPE_BUTTON:
+    return "button";
+  case V4L2_CTRL_TYPE_INTEGER64:
+    return "int64_t";
+  case V4L2_CTRL_TYPE_CTRL_CLASS:
+    return "class";
+  case V4L2_CTRL_TYPE_STRING:
+    return "string";
+  case V4L2_CTRL_TYPE_BITMASK:
+    return "bitmask";
+  case V4L2_CTRL_TYPE_INTEGER_MENU:
+    return "int_menu";
+  default:
+    return "unknown";
+  }
 }
 
-void UsbCamNode::service_capture(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-  std::shared_ptr<std_srvs::srv::SetBool::Response> response)
-{
-  (void) request_header;
-  if (request->data) {
-    m_camera->start_capturing();
-    response->message = "Start Capturing";
-  } else {
-    m_camera->stop_capturing();
-    response->message = "Stop Capturing";
-  }
-}
-
-void UsbCamNode::init()
-{
-  while (m_parameters.frame_id == "") {
-    RCLCPP_WARN_ONCE(
-      this->get_logger(), "Required Parameters not set...waiting until they are set");
-    get_params();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-  }
-
-  // load the camera info
-  m_camera_info.reset(
-    new camera_info_manager::CameraInfoManager(
-      this, m_parameters.camera_name, m_parameters.camera_info_url));
-  // check for default camera info
-  if (!m_camera_info->isCalibrated()) {
-    m_camera_info->setCameraName(m_parameters.device_name);
-    m_camera_info_msg->header.frame_id = m_parameters.frame_id;
-    m_camera_info_msg->width = m_parameters.image_width;
-    m_camera_info_msg->height = m_parameters.image_height;
-    m_camera_info->setCameraInfo(*m_camera_info_msg);
-  }
-
-  // Check if given device name is an available v4l2 device
-  auto available_devices = usb_cam::utils::available_devices();
-  if (available_devices.find(m_parameters.device_name) == available_devices.end()) {
-    RCLCPP_ERROR_STREAM(
-      this->get_logger(),
-      "Device specified is not available or is not a vaild V4L2 device: `" <<
-        m_parameters.device_name << "`"
-    );
-    RCLCPP_INFO(this->get_logger(), "Available V4L2 devices are:");
-    for (const auto & device : available_devices) {
-      RCLCPP_INFO_STREAM(this->get_logger(), "    " << device.first);
-      RCLCPP_INFO_STREAM(this->get_logger(), "        " << device.second.card);
-    }
-    rclcpp::shutdown();
-    return;
-  }
-
-  // if pixel format is equal to 'mjpeg', i.e. raw mjpeg stream, initialize compressed image message
-  // and publisher
-  if (m_parameters.pixel_format_name == "mjpeg") {
-    m_compressed_img_msg.reset(new sensor_msgs::msg::CompressedImage());
-    m_compressed_img_msg->header.frame_id = m_parameters.frame_id;
-    m_compressed_image_publisher =
-      this->create_publisher<sensor_msgs::msg::CompressedImage>(
-      std::string(BASE_TOPIC_NAME) + "/compressed", rclcpp::QoS(100));
-    m_compressed_cam_info_publisher =
-      this->create_publisher<sensor_msgs::msg::CameraInfo>(
-      "camera_info", rclcpp::QoS(100));
-  }
-
-  m_image_msg->header.frame_id = m_parameters.frame_id;
-  RCLCPP_INFO(
-    this->get_logger(), "Starting '%s' (%s) at %dx%d via %s (%s) at %i FPS",
-    m_parameters.camera_name.c_str(), m_parameters.device_name.c_str(),
-    m_parameters.image_width, m_parameters.image_height, m_parameters.io_method_name.c_str(),
-    m_parameters.pixel_format_name.c_str(), m_parameters.framerate);
-  // set the IO method
-  io_method_t io_method =
-    usb_cam::utils::io_method_from_string(m_parameters.io_method_name);
-  if (io_method == usb_cam::utils::IO_METHOD_UNKNOWN) {
-    RCLCPP_ERROR_ONCE(
-      this->get_logger(),
-      "Unknown IO method '%s'", m_parameters.io_method_name.c_str());
-    rclcpp::shutdown();
-    return;
-  }
-  // configure the camera
-  m_camera->configure(m_parameters, io_method);
-
-  RCLCPP_INFO(this->get_logger(), "This devices supproted formats:");
-  for (auto fmt : m_camera->supported_formats()) {
-    RCLCPP_INFO(
-      this->get_logger(),
-      "\t%s: %d x %d (%d Hz)",
-      fmt.format.description,
-      fmt.v4l2_fmt.width,
-      fmt.v4l2_fmt.height,
-      fmt.v4l2_fmt.discrete.denominator / fmt.v4l2_fmt.discrete.numerator);
-  }
-
-  set_v4l2_params();
-
-  // start the camera
-  m_camera->start();
-
-  // TODO(lucasw) should this check a little faster than expected frame rate?
-  // TODO(lucasw) how to do small than ms, or fractional ms- std::chrono::nanoseconds?
-  const int period_ms = 1000.0 / m_parameters.framerate;
-  m_timer = this->create_wall_timer(
-    std::chrono::milliseconds(static_cast<int64_t>(period_ms)),
-    std::bind(&UsbCamNode::update, this));
-  RCLCPP_INFO_STREAM(this->get_logger(), "Timer triggering every " << period_ms << " ms");
-}
-
-void UsbCamNode::get_params()
-{
-  auto parameters_client = std::make_shared<rclcpp::SyncParametersClient>(this);
-  auto parameters = parameters_client->get_parameters(
+  void UsbCamNode::declare_camera_parameters(rclcpp::Node *node, std::vector<ControlInfo> cam_params)
+  {
+    // Iterate through each parameter and declare it in the node
+    for (const auto &param : cam_params)
     {
-      "camera_name", "camera_info_url", "frame_id", "framerate", "image_height", "image_width",
-      "io_method", "pixel_format", "av_device_format", "video_device", "brightness", "contrast",
-      "saturation", "sharpness", "gain", "white_balance_automatic", "white_balance_temperature", 
-      "auto_exposure", "exposure_time_absolute", "backlight_compensation"
-    }
-  );
+      std::string control_type = control_type_to_string(param.type);
+      if (control_type == "int" || control_type == "int64_t" || control_type == "int_menu")
+      {
+        RCLCPP_INFO(node->get_logger(), "int %s", param.name.c_str());
+        node->declare_parameter(param.name, param.default_value);
+      }
+      else if (control_type == "bool")
+      {
+        RCLCPP_INFO(node->get_logger(), "bool %s", param.name.c_str());
 
-  assign_params(parameters);
-}
-
-void UsbCamNode::assign_params(const std::vector<rclcpp::Parameter> & parameters)
-{
-  for (auto & parameter : parameters) {
-    if (parameter.get_name() == "camera_name") {
-      RCLCPP_INFO(this->get_logger(), "camera_name value: %s", parameter.value_to_string().c_str());
-      m_parameters.camera_name = parameter.value_to_string();
-    } else if (parameter.get_name() == "camera_info_url") {
-      m_parameters.camera_info_url = parameter.value_to_string();
-    } else if (parameter.get_name() == "frame_id") {
-      m_parameters.frame_id = parameter.value_to_string();
-    } else if (parameter.get_name() == "framerate") {
-      RCLCPP_WARN(this->get_logger(), "framerate: %f", parameter.as_double());
-      m_parameters.framerate = parameter.as_double();
-    } else if (parameter.get_name() == "image_height") {
-      m_parameters.image_height = parameter.as_int();
-    } else if (parameter.get_name() == "image_width") {
-      m_parameters.image_width = parameter.as_int();
-    } else if (parameter.get_name() == "io_method") {
-      m_parameters.io_method_name = parameter.value_to_string();
-    } else if (parameter.get_name() == "pixel_format") {
-      m_parameters.pixel_format_name = parameter.value_to_string();
-    } else if (parameter.get_name() == "av_device_format") {
-      m_parameters.av_device_format = parameter.value_to_string();
-    } else if (parameter.get_name() == "video_device") {
-      m_parameters.device_name = parameter.value_to_string();
-    } else if (parameter.get_name() == "brightness") {
-      m_parameters.brightness = parameter.as_int();
-    } else if (parameter.get_name() == "contrast") {
-      m_parameters.contrast = parameter.as_int();
-    } else if (parameter.get_name() == "saturation") {
-      m_parameters.saturation = parameter.as_int();
-    } else if (parameter.get_name() == "sharpness") {
-      m_parameters.sharpness = parameter.as_int();
-    } else if (parameter.get_name() == "gain") {
-      m_parameters.gain = parameter.as_int();
-    } else if (parameter.get_name() == "white_balance_automatic") {
-      m_parameters.white_balance_automatic = parameter.as_bool();
-    } else if (parameter.get_name() == "white_balance_temperature") {
-      m_parameters.white_balance_temperature = parameter.as_int();
-    } else if (parameter.get_name() == "auto_exposure") {
-      m_parameters.auto_exposure = parameter.as_bool();
-    } else if (parameter.get_name() == "exposure_time_absolute") {
-      m_parameters.exposure_time_absolute = parameter.as_int();
-    } else if (parameter.get_name() == "backlight_compensation") {
-      m_parameters.backlight_compensation = parameter.as_bool();
-    } else {
-      RCLCPP_WARN(this->get_logger(), "Invalid parameter name: %s", parameter.get_name().c_str());
+        bool default_bool_value = param.default_value != 0; // Convert to boolean
+        node->declare_parameter(param.name, default_bool_value);
+      }
+      else if (control_type == "string")
+      {
+        // Declare a string parameter with an empty default value or based on control defaults if applicable
+        node->declare_parameter(param.name, std::string(""));
+      }
+      else if (control_type == "bitmask")
+      {
+        node->declare_parameter(param.name, param.default_value); // Treat bitmask as an integer
+      }
+      else if (control_type == "menu")
+      {
+        // Declare an integer for the menu type (assuming default_value is valid)
+        node->declare_parameter(param.name, param.default_value);
+      }
+      else if (control_type == "button" || control_type == "class" || control_type == "unknown")
+      {
+        // For types like button or unknown, we might not want to declare them as parameters
+        RCLCPP_INFO(node->get_logger(), "Skipping unsupported parameter type: %s", control_type.c_str());
+      }
+      // Print out the parameter name for debugging
+      RCLCPP_INFO_STREAM(node->get_logger(), "Declared parameter: " << param.name << "; control_type:" << control_type);
     }
   }
-}
 
-/// @brief Send current parameters to V4L2 device
-/// TODO(flynneva): should this actuaully be part of UsbCam class?
-void UsbCamNode::set_v4l2_params()
-{
-  // set camera parameters
-  if (m_parameters.brightness >= 0) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'brightness' to %d", m_parameters.brightness);
-    m_camera->set_v4l_parameter("brightness", m_parameters.brightness);
-  }
 
-  if (m_parameters.contrast >= 0) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'contrast' to %d", m_parameters.contrast);
-    m_camera->set_v4l_parameter("contrast", m_parameters.contrast);
-  }
-
-  if (m_parameters.saturation >= 0) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'saturation' to %d", m_parameters.saturation);
-    m_camera->set_v4l_parameter("saturation", m_parameters.saturation);
-  }
-
-  if (m_parameters.sharpness >= 0) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'sharpness' to %d", m_parameters.sharpness);
-    m_camera->set_v4l_parameter("sharpness", m_parameters.sharpness);
-  }
-
-  if (m_parameters.gain >= 0) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'gain' to %d", m_parameters.gain);
-    m_camera->set_v4l_parameter("gain", m_parameters.gain);
-  }
-
-  // check auto white balance
-  if (m_parameters.white_balance_automatic) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'white_balance_automatic' to %d", 1);
-    m_camera->set_v4l_parameter("white_balance_automatic", 1);
-  } else {
-    RCLCPP_INFO(this->get_logger(), "Setting 'white_balance_temperature' to %d", m_parameters.white_balance_temperature);
-    m_camera->set_v4l_parameter("white_balance_automatic", 0);
-    m_camera->set_v4l_parameter("white_balance_temperature", m_parameters.white_balance_temperature);
-  }
-
-  // check auto exposure
-  // https://www.kernel.org/doc/html/next/userspace-api/media/v4l/ext-ctrls-camera.html
-  // 0: V4L2_EXPOSURE_AUTO
-  // 1: V4L2_EXPOSURE_MANUAL
-  // 2: V4L2_EXPOSURE_SHUTTER_PRIORITY
-  // 3: V4L2_EXPOSURE_APETURE_PRIORITY
-  if (!m_parameters.auto_exposure) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'exposure' to 'MANUAL'");
-    // turn down exposure control (from max of 3)
-    m_camera->set_v4l_parameter("auto_exposure", 2);
-    // change the exposure level
-    RCLCPP_INFO(this->get_logger(), "Setting 'exposure_time_absolute' to %d", m_parameters.exposure_time_absolute);
-    m_camera->set_v4l_parameter("exposure_time_absolute", m_parameters.exposure_time_absolute);
-  } else {
-    RCLCPP_INFO(this->get_logger(), "Setting 'exposure' to 'AUTO'");
-    m_camera->set_v4l_parameter("auto_exposure", 0);
-  }
-
-  if (!m_parameters.backlight_compensation) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'backlight_compensation' to '%d'", 0);
-    m_camera->set_v4l_parameter("backlight_compensation", 0);
-  } else {
-    RCLCPP_INFO(this->get_logger(), "Setting 'backlight_compensation' to '%d'", 1);
-    m_camera->set_v4l_parameter("backlight_compensation", 1);
-  }
-}
-
-bool UsbCamNode::take_and_send_image()
-{
-  // Only resize if required
-  if (sizeof(m_image_msg->data) != m_camera->get_image_size_in_bytes()) {
-    m_image_msg->width = m_camera->get_image_width();
-    m_image_msg->height = m_camera->get_image_height();
-    m_image_msg->encoding = m_camera->get_pixel_format()->ros();
-    m_image_msg->step = m_camera->get_image_step();
-    if (m_image_msg->step == 0) {
-      // Some formats don't have a linesize specified by v4l2
-      // Fall back to manually calculating it step = size / height
-      m_image_msg->step = m_camera->get_image_size_in_bytes() / m_image_msg->height;
+  std::vector<ControlInfo> UsbCamNode::get_control_data(const std::string &device)
+  {
+    std::vector<ControlInfo> controls;
+    int fd = open(device.c_str(), O_RDWR);
+    if (fd == -1)
+    {
+      perror("Opening video device");
+      return controls;
     }
-    m_image_msg->data.resize(m_camera->get_image_size_in_bytes());
+
+    struct v4l2_queryctrl queryctrl;
+    struct v4l2_querymenu querymenu;
+    memset(&queryctrl, 0, sizeof(queryctrl));
+
+    queryctrl.id = V4L2_CTRL_FLAG_NEXT_CTRL;
+    while (0 == ioctl(fd, VIDIOC_QUERYCTRL, &queryctrl))
+    {
+      // Filter out disabled controls and any top-level control categories
+      if (!(queryctrl.flags & V4L2_CTRL_FLAG_DISABLED) &&
+          std::strcmp(reinterpret_cast<char *>(queryctrl.name), "User Controls") != 0 &&
+          std::strcmp(reinterpret_cast<char *>(queryctrl.name), "Camera Controls") != 0)
+      {
+        ControlInfo info;
+
+        // Convert control name to string and format it if necessary
+        std::string control_name = reinterpret_cast<char *>(queryctrl.name);
+        control_name.erase(std::remove(control_name.begin(), control_name.end(), ','), control_name.end()); // Remove commas
+        std::replace(control_name.begin(), control_name.end(), ' ', '_');                                   // Replace spaces with underscores
+        std::transform(control_name.begin(), control_name.end(), control_name.begin(), [](unsigned char c)
+                       { return std::tolower(c); });
+
+        info.name = control_name;
+        info.type = queryctrl.type;
+        info.minimum = queryctrl.minimum;
+        info.maximum = queryctrl.maximum;
+        info.step = queryctrl.step;
+        info.default_value = queryctrl.default_value;
+
+        // If the control type is a menu, populate the menu items
+        if (queryctrl.type == V4L2_CTRL_TYPE_MENU)
+        {
+          memset(&querymenu, 0, sizeof(querymenu));
+          querymenu.id = queryctrl.id;
+
+          for (querymenu.index = queryctrl.minimum; querymenu.index <= static_cast<unsigned int>(queryctrl.maximum); querymenu.index++)
+          {
+            if (0 == ioctl(fd, VIDIOC_QUERYMENU, &querymenu))
+            {
+              std::string menu_item_name = std::to_string(querymenu.index) + ": " + reinterpret_cast<char *>(querymenu.name);
+              menu_item_name.erase(std::remove(menu_item_name.begin(), menu_item_name.end(), ','), menu_item_name.end()); // Remove commas
+              info.menu_items.push_back(menu_item_name);
+            }
+          }
+        }
+
+        // Print control info for debugging
+        std::cout << "Control Name: " << info.name << std::endl;
+        std::cout << "Type: " << info.type << std::endl;
+        std::cout << "Min: " << info.minimum << ", Max: " << info.maximum << ", Step: " << info.step << ", Default: " << info.default_value << std::endl;
+
+        // Add control info to the list
+        controls.push_back(info);
+      }
+      // Move to the next control
+      queryctrl.id |= V4L2_CTRL_FLAG_NEXT_CTRL;
+    }
+
+    if (errno != EINVAL)
+    {
+      perror("VIDIOC_QUERYCTRL");
+    }
+
+    close(fd);
+    return controls;
   }
 
-  // grab the image, pass image msg buffer to fill
-  m_camera->get_image(reinterpret_cast<char *>(&m_image_msg->data[0]));
-
-  auto stamp = m_camera->get_image_timestamp();
-  m_image_msg->header.stamp.sec = stamp.tv_sec;
-  m_image_msg->header.stamp.nanosec = stamp.tv_nsec;
-
-  *m_camera_info_msg = m_camera_info->getCameraInfo();
-  m_camera_info_msg->header = m_image_msg->header;
-  m_image_publisher->publish(*m_image_msg, *m_camera_info_msg);
-  return true;
-}
-
-bool UsbCamNode::take_and_send_image_mjpeg()
-{
-  // Only resize if required
-  if (sizeof(m_compressed_img_msg->data) != m_camera->get_image_size_in_bytes()) {
-    m_compressed_img_msg->format = "jpeg";
-    m_compressed_img_msg->data.resize(m_camera->get_image_size_in_bytes());
-  }
-
-  // grab the image, pass image msg buffer to fill
-  m_camera->get_image(reinterpret_cast<char *>(&m_compressed_img_msg->data[0]));
-
-  auto stamp = m_camera->get_image_timestamp();
-  m_compressed_img_msg->header.stamp.sec = stamp.tv_sec;
-  m_compressed_img_msg->header.stamp.nanosec = stamp.tv_nsec;
-
-  *m_camera_info_msg = m_camera_info->getCameraInfo();
-  m_camera_info_msg->header = m_compressed_img_msg->header;
-
-  m_compressed_image_publisher->publish(*m_compressed_img_msg);
-  m_compressed_cam_info_publisher->publish(*m_camera_info_msg);
-  return true;
-}
-
-rcl_interfaces::msg::SetParametersResult UsbCamNode::parameters_callback(
-  const std::vector<rclcpp::Parameter> & parameters)
-{
-  RCLCPP_DEBUG(this->get_logger(), "Setting parameters for %s", m_parameters.camera_name.c_str());
-  m_timer->reset();
-  assign_params(parameters);
-  set_v4l2_params();
-  rcl_interfaces::msg::SetParametersResult result;
-  result.successful = true;
-  result.reason = "success";
-  return result;
-}
-
-void UsbCamNode::update()
-{
-  if (m_camera->is_capturing()) {
-    // If the camera exposure longer higher than the framerate period
-    // then that caps the framerate.
-    // auto t0 = now();
-    bool isSuccessful = (m_parameters.pixel_format_name == "mjpeg") ?
-      take_and_send_image_mjpeg() :
-      take_and_send_image();
-    if (!isSuccessful) {
-      RCLCPP_WARN_ONCE(this->get_logger(), "USB camera did not respond in time.");
+  void UsbCamNode::service_capture(
+      const std::shared_ptr<rmw_request_id_t> request_header,
+      const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+      std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+  {
+    (void)request_header;
+    if (request->data)
+    {
+      m_camera->start_capturing();
+      response->message = "Start Capturing";
+    }
+    else
+    {
+      m_camera->stop_capturing();
+      response->message = "Stop Capturing";
     }
   }
-}
-}  // namespace usb_cam
 
+  void UsbCamNode::init()
+  {
+    while (m_parameters.frame_id == "")
+    {
+      RCLCPP_WARN_ONCE(
+          this->get_logger(), "Required Parameters not set...waiting until they are set");
+      get_params();
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+
+    // load the camera info
+    m_camera_info.reset(
+        new camera_info_manager::CameraInfoManager(
+            this, m_parameters.camera_name, m_parameters.camera_info_url));
+    // check for default camera info
+    if (!m_camera_info->isCalibrated())
+    {
+      m_camera_info->setCameraName(m_parameters.device_name);
+      m_camera_info_msg->header.frame_id = m_parameters.frame_id;
+      m_camera_info_msg->width = m_parameters.image_width;
+      m_camera_info_msg->height = m_parameters.image_height;
+      m_camera_info->setCameraInfo(*m_camera_info_msg);
+    }
+
+    // Check if given device name is an available v4l2 device
+    auto available_devices = usb_cam::utils::available_devices();
+    if (available_devices.find(m_parameters.device_name) == available_devices.end())
+    {
+      RCLCPP_ERROR_STREAM(
+          this->get_logger(),
+          "Device specified is not available or is not a vaild V4L2 device: `" << m_parameters.device_name << "`");
+      RCLCPP_INFO(this->get_logger(), "Available V4L2 devices are:");
+      for (const auto &device : available_devices)
+      {
+        RCLCPP_INFO_STREAM(this->get_logger(), "    " << device.first);
+        RCLCPP_INFO_STREAM(this->get_logger(), "        " << device.second.card);
+      }
+      rclcpp::shutdown();
+      return;
+    }
+
+    // if pixel format is equal to 'mjpeg', i.e. raw mjpeg stream, initialize compressed image message
+    // and publisher
+    if (m_parameters.pixel_format == "mjpeg")
+    {
+      m_compressed_img_msg.reset(new sensor_msgs::msg::CompressedImage());
+      m_compressed_img_msg->header.frame_id = m_parameters.frame_id;
+      m_compressed_image_publisher =
+          this->create_publisher<sensor_msgs::msg::CompressedImage>(
+              std::string(BASE_TOPIC_NAME) + "/compressed", rclcpp::QoS(100));
+      m_compressed_cam_info_publisher =
+          this->create_publisher<sensor_msgs::msg::CameraInfo>(
+              "camera_info", rclcpp::QoS(100));
+    }
+
+    m_image_msg->header.frame_id = m_parameters.frame_id;
+    RCLCPP_INFO(
+        this->get_logger(), "Starting '%s' (%s) at %dx%d via %s (%s) at %i FPS",
+        m_parameters.camera_name.c_str(), m_parameters.device_name.c_str(),
+        m_parameters.image_width, m_parameters.image_height, m_parameters.io_method.c_str(),
+        m_parameters.pixel_format.c_str(), m_parameters.framerate);
+    // set the IO method
+    io_method_t io_method =
+        usb_cam::utils::io_method_from_string(m_parameters.io_method);
+    if (io_method == usb_cam::utils::IO_METHOD_UNKNOWN)
+    {
+      RCLCPP_ERROR_ONCE(
+          this->get_logger(),
+          "Unknown IO method '%s'", m_parameters.io_method.c_str());
+      rclcpp::shutdown();
+      return;
+    }
+    // configure the camera
+    m_camera->configure(m_parameters, io_method);
+
+    RCLCPP_INFO(this->get_logger(), "This devices supproted formats:");
+    for (auto fmt : m_camera->supported_formats())
+    {
+      RCLCPP_INFO(
+          this->get_logger(),
+          "\t%s: %d x %d (%d Hz)",
+          fmt.format.description,
+          fmt.v4l2_fmt.width,
+          fmt.v4l2_fmt.height,
+          fmt.v4l2_fmt.discrete.denominator / fmt.v4l2_fmt.discrete.numerator);
+    }
+
+    set_v4l2_params();
+
+    // start the camera
+    m_camera->start();
+
+    // TODO(lucasw) should this check a little faster than expected frame rate?
+    // TODO(lucasw) how to do small than ms, or fractional ms- std::chrono::nanoseconds?
+    const int period_ms = 1000.0 / m_parameters.framerate;
+    m_timer = this->create_wall_timer(
+        std::chrono::milliseconds(static_cast<int64_t>(period_ms)),
+        std::bind(&UsbCamNode::update, this));
+    RCLCPP_INFO_STREAM(this->get_logger(), "Timer triggering every " << period_ms << " ms");
+  }
+
+  void UsbCamNode::assign_params()
+  {
+    std::string camera_name = this->get_parameter("camera_name").as_string();
+    RCLCPP_INFO(this->get_logger(), "camera_name value: %s", camera_name.c_str());
+    m_parameters.camera_name = camera_name;
+
+    std::string camera_info_url = this->get_parameter("camera_info_url").as_string();
+    RCLCPP_INFO(this->get_logger(), "camera_info_url value: %s", camera_info_url.c_str());
+    m_parameters.camera_info_url = camera_info_url;
+
+    std::string frame_id = this->get_parameter("frame_id").as_string();
+    RCLCPP_INFO(this->get_logger(), "frame_id value: %s", frame_id.c_str());
+    m_parameters.frame_id = frame_id;
+
+    double framerate = this->get_parameter("framerate").as_double();
+    RCLCPP_INFO(this->get_logger(), "framerate value: %f", framerate);
+    m_parameters.framerate = framerate;
+
+    int image_height = this->get_parameter("image_height").as_int();
+    RCLCPP_INFO(this->get_logger(), "image_height value: %d", image_height);
+    m_parameters.image_height = image_height;
+
+    int image_width = this->get_parameter("image_width").as_int();
+    RCLCPP_INFO(this->get_logger(), "image_width value: %d", image_width);
+    m_parameters.image_width = image_width;
+
+    std::string io_method = this->get_parameter("io_method").as_string();
+    RCLCPP_INFO(this->get_logger(), "io_method value: %s", io_method.c_str());
+    m_parameters.io_method = io_method;
+
+    std::string pixel_format = this->get_parameter("pixel_format").as_string();
+    RCLCPP_INFO(this->get_logger(), "pixel_format value: %s", pixel_format.c_str());
+    m_parameters.pixel_format = pixel_format;
+
+    std::string av_device_format = this->get_parameter("av_device_format").as_string();
+    RCLCPP_INFO(this->get_logger(), "av_device_format value: %s", av_device_format.c_str());
+    m_parameters.av_device_format = av_device_format;
+
+    // Iterate through each parameter and declare it in the node
+    for (auto &param : cam_params)
+    {
+      std::string control_type = control_type_to_string(param.type);
+      if (control_type == "int" || control_type == "int64_t" || control_type == "int_menu")
+      {
+        param.set_value = this->get_parameter(param.name).as_int();
+        RCLCPP_INFO(this->get_logger(), "%s value: %d", param.name.c_str(), param.set_value);
+      }
+      else if (control_type == "bool")
+      {
+        param.set_value = this->get_parameter(param.name).as_bool();
+        RCLCPP_INFO(this->get_logger(), "%s value: %d", param.name.c_str(), param.set_value);
+      }
+    }
+  }
+
+  /// @brief Send current parameters to V4L2 device
+  /// TODO(flynneva): should this actuaully be part of UsbCam class?
+  void UsbCamNode::set_v4l2_params()
+  {
+    // Iterate through each parameter and declare it in the node
+    for (const auto &param : cam_params)
+    {
+      // std::string control_type = control_type_to_string(param.type);
+      // if (control_type == "int" || control_type == "int64_t" || control_type == "int_menu")
+      {
+        if (param.set_value != -1 && param.default_value != param.set_value)
+        {
+          RCLCPP_INFO(this->get_logger(), "Setting '%s' to %d", param.name.c_str(), param.default_value);
+          m_camera->set_v4l_parameter(param.name, param.set_value);
+        }
+      }
+      // else if (control_type == "bool")
+      // {
+      //   RCLCPP_INFO(this->get_logger(), "Setting '%s' to %d", param.name.c_str(), param.default_value);
+      //   m_camera->set_v4l_parameter(param.name, param.set_value);
+      // }
+    }
+  }
+
+  bool UsbCamNode::take_and_send_image()
+  {
+    // Only resize if required
+    if (sizeof(m_image_msg->data) != m_camera->get_image_size_in_bytes())
+    {
+      m_image_msg->width = m_camera->get_image_width();
+      m_image_msg->height = m_camera->get_image_height();
+      m_image_msg->encoding = m_camera->get_pixel_format()->ros();
+      m_image_msg->step = m_camera->get_image_step();
+      if (m_image_msg->step == 0)
+      {
+        // Some formats don't have a linesize specified by v4l2
+        // Fall back to manually calculating it step = size / height
+        m_image_msg->step = m_camera->get_image_size_in_bytes() / m_image_msg->height;
+      }
+      m_image_msg->data.resize(m_camera->get_image_size_in_bytes());
+    }
+
+    // grab the image, pass image msg buffer to fill
+    m_camera->get_image(reinterpret_cast<char *>(&m_image_msg->data[0]));
+
+    auto stamp = m_camera->get_image_timestamp();
+    m_image_msg->header.stamp.sec = stamp.tv_sec;
+    m_image_msg->header.stamp.nanosec = stamp.tv_nsec;
+
+    *m_camera_info_msg = m_camera_info->getCameraInfo();
+    m_camera_info_msg->header = m_image_msg->header;
+    m_image_publisher->publish(*m_image_msg, *m_camera_info_msg);
+    return true;
+  }
+
+  bool UsbCamNode::take_and_send_image_mjpeg()
+  {
+    // Only resize if required
+    if (sizeof(m_compressed_img_msg->data) != m_camera->get_image_size_in_bytes())
+    {
+      m_compressed_img_msg->format = "jpeg";
+      m_compressed_img_msg->data.resize(m_camera->get_image_size_in_bytes());
+    }
+
+    // grab the image, pass image msg buffer to fill
+    m_camera->get_image(reinterpret_cast<char *>(&m_compressed_img_msg->data[0]));
+
+    auto stamp = m_camera->get_image_timestamp();
+    m_compressed_img_msg->header.stamp.sec = stamp.tv_sec;
+    m_compressed_img_msg->header.stamp.nanosec = stamp.tv_nsec;
+
+    *m_camera_info_msg = m_camera_info->getCameraInfo();
+    m_camera_info_msg->header = m_compressed_img_msg->header;
+
+    m_compressed_image_publisher->publish(*m_compressed_img_msg);
+    m_compressed_cam_info_publisher->publish(*m_camera_info_msg);
+    return true;
+  }
+
+  rcl_interfaces::msg::SetParametersResult UsbCamNode::parameters_callback(
+      const std::vector<rclcpp::Parameter> &parameters)
+  {
+    RCLCPP_DEBUG(this->get_logger(), "Setting parameters for %s", m_parameters.camera_name.c_str());
+    m_timer->reset();
+    assign_params();
+    RCLCPP_DEBUG(this->get_logger(), " %ld", parameters.size());
+
+    set_v4l2_params();
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    result.reason = "success";
+    return result;
+  }
+
+  void UsbCamNode::update()
+  {
+    if (m_camera->is_capturing())
+    {
+      // If the camera exposure longer higher than the framerate period
+      // then that caps the framerate.
+      // auto t0 = now();
+      bool isSuccessful = (m_parameters.pixel_format == "mjpeg") ? take_and_send_image_mjpeg() : take_and_send_image();
+      if (!isSuccessful)
+      {
+        RCLCPP_WARN_ONCE(this->get_logger(), "USB camera did not respond in time.");
+      }
+    }
+  }
+} // namespace usb_cam
 
 #include "rclcpp_components/register_node_macro.hpp"
 RCLCPP_COMPONENTS_REGISTER_NODE(usb_cam::UsbCamNode)

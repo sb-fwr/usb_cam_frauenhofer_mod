@@ -66,34 +66,22 @@ namespace usb_cam
     struct v4l2_frmivalenum v4l2_fmt;
   } capture_format_t;
 
+    // these parameters are standarts, th others are setup at runtime
+    // v4l2-ctl --device=0 --list-formats-ext
+    // to discover them,
+    // or guvcview
   typedef struct
   {
     std::string camera_name; // can be anything
     std::string device_name; // usually /dev/video0 or something similiar
     std::string frame_id;
-    std::string io_method_name;
+    std::string io_method;
     std::string camera_info_url;
-    // these parameters all have to be a combination supported by the device
-    // Use
-    // v4l2-ctl --device=0 --list-formats-ext
-    // to discover them,
-    // or guvcview
-    std::string pixel_format_name;
+    std::string pixel_format;
     std::string av_device_format;
     int image_width;
     int image_height;
     int framerate;
-    // get full ist of supported parameters by calling 'v4l2-ctl --device=<device> -L'
-    int brightness;
-    int contrast;
-    int saturation;
-    int sharpness;
-    int gain;
-    int white_balance_temperature;
-    int exposure_time_absolute;
-    bool white_balance_automatic;
-    bool auto_exposure;
-    bool backlight_compensation;
   } parameters_t;
 
   typedef struct
@@ -134,7 +122,7 @@ namespace usb_cam
   class UsbCam
   {
   public:
-    UsbCam(std::function<void(size_t)> resize_if_nessesary);
+    UsbCam(std::function<void(size_t)> resize_ros_image_buffer_if_nessesary);
     ~UsbCam();
 
     /// @brief Configure device, should be called before start
@@ -291,53 +279,53 @@ namespace usb_cam
       using usb_cam::formats::YUYV;
       using usb_cam::formats::YUYV2RGB;
 
-      if (parameters.pixel_format_name == "rgb8")
+      if (parameters.pixel_format == "rgb8")
       {
         m_image.pixel_format = std::make_shared<RGB8>();
       }
-      else if (parameters.pixel_format_name == "yuyv")
+      else if (parameters.pixel_format == "yuyv")
       {
         m_image.pixel_format = std::make_shared<YUYV>();
       }
-      else if (parameters.pixel_format_name == "yuyv2rgb")
+      else if (parameters.pixel_format == "yuyv2rgb")
       {
         // number of pixels required for conversion method
         m_image.pixel_format = std::make_shared<YUYV2RGB>(m_image.number_of_pixels);
       }
-      else if (parameters.pixel_format_name == "uyvy")
+      else if (parameters.pixel_format == "uyvy")
       {
         m_image.pixel_format = std::make_shared<UYVY>();
       }
-      else if (parameters.pixel_format_name == "uyvy2rgb")
+      else if (parameters.pixel_format == "uyvy2rgb")
       {
         // number of pixels required for conversion method
         m_image.pixel_format = std::make_shared<UYVY2RGB>(m_image.number_of_pixels);
       }
-      else if (parameters.pixel_format_name == "mjpeg")
+      else if (parameters.pixel_format == "mjpeg")
       {
         m_image.pixel_format = std::make_shared<RAW_MJPEG>(
             formats::get_av_pixel_format_from_string(parameters.av_device_format));
       }
-      else if (parameters.pixel_format_name == "mjpeg2rgb")
+      else if (parameters.pixel_format == "mjpeg2rgb")
       {
         m_image.pixel_format = std::make_shared<MJPEG2RGB>(
             m_image.width, m_image.height,
             formats::get_av_pixel_format_from_string(parameters.av_device_format));
       }
-      else if (parameters.pixel_format_name == "m4202rgb")
+      else if (parameters.pixel_format == "m4202rgb")
       {
         m_image.pixel_format = std::make_shared<M4202RGB>(
             m_image.width, m_image.height);
       }
-      else if (parameters.pixel_format_name == "mono8")
+      else if (parameters.pixel_format == "mono8")
       {
         m_image.pixel_format = std::make_shared<MONO8>();
       }
-      else if (parameters.pixel_format_name == "mono16")
+      else if (parameters.pixel_format == "mono16")
       {
         m_image.pixel_format = std::make_shared<MONO16>();
       }
-      else if (parameters.pixel_format_name == "y102mono8")
+      else if (parameters.pixel_format == "y102mono8")
       {
         m_image.pixel_format = std::make_shared<Y102MONO8>(m_image.number_of_pixels);
       }
@@ -345,14 +333,14 @@ namespace usb_cam
       {
         throw std::invalid_argument(
             "Unsupported pixel format specified: " +
-            parameters.pixel_format_name);
+            parameters.pixel_format);
       }
 
       return m_image.pixel_format;
     }
 
   private:
-    std::function<void(size_t)> resize_if_nessesary;
+    std::function<void(size_t)> resize_ros_image_buffer_if_nessesary;
     void init_read();
     void init_mmap();
     void init_userp();
