@@ -74,7 +74,9 @@ namespace usb_cam
 
     // declare params
     // get full ist of supported parameters by calling 'v4l2-ctl --device=<device> -L'
-    this->declare_parameter("camera_name", "default_cam");
+    rcl_interfaces::msg::ParameterDescriptor param_desc_camera_name = rcl_interfaces::msg::ParameterDescriptor{};
+    param_desc_camera_name.description = "name used for device";
+    this->declare_parameter("camera_name", "default_cam", param_desc_camera_name);
     this->declare_parameter("camera_info_url", "");
     this->declare_parameter("framerate", 30.0);
     this->declare_parameter("frame_id", "default_cam");
